@@ -127,6 +127,8 @@ def inference(image, keep_prob):
 
         annotation_pred = tf.argmax(conv_t3, dimension=3, name="prediction")
 
+        print("anno, conv_t3 shape", tf.shape(annotation_pred), tf.shape(conv_t3))
+
     return tf.expand_dims(annotation_pred, dim=3), conv_t3
 
 
@@ -190,6 +192,7 @@ def main(argv=None):
         for itr in xrange(MAX_ITERATION):
             train_images, train_annotations = train_dataset_reader.next_batch(FLAGS.batch_size)
             feed_dict = {image: train_images, annotation: train_annotations, keep_probability: 0.85}
+            print(train_images.shape, train_annotations.shape)
 
             sess.run(train_op, feed_dict=feed_dict)
 

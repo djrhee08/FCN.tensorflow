@@ -1,9 +1,5 @@
-"""
-Code ideas from https://github.com/Newmu/dcgan and tensorflow mnist dataset reader
-"""
 import numpy as np
 import scipy.misc as misc
-
 
 class BatchDatset:
     files = []
@@ -36,8 +32,8 @@ class BatchDatset:
         self.__channels = False
         self.annotations = np.array(
             [np.expand_dims(self._transform(filename['annotation']), axis=3) for filename in self.files])
-        print (self.images.shape)
-        print (self.annotations.shape)
+        print(self.images.shape)
+        print(self.annotations.shape)
 
     def _transform(self, filename):
         image = misc.imread(filename)

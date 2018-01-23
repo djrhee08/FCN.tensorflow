@@ -19,11 +19,11 @@ def read_dataset(data_dir):
         utils.maybe_download_and_extract(data_dir, DATA_URL, is_zipfile=True)
         SceneParsing_folder = os.path.splitext(DATA_URL.split("/")[-1])[0]
         result = create_image_lists(os.path.join(data_dir, SceneParsing_folder))
-        print ("Pickling ...")
+        print("Pickling ...")
         with open(pickle_filepath, 'wb') as f:
             pickle.dump(result, f, pickle.HIGHEST_PROTOCOL)
     else:
-        print ("Found pickle file!")
+        print("Found pickle file!")
 
     with open(pickle_filepath, 'rb') as f:
         result = pickle.load(f)
@@ -61,6 +61,6 @@ def create_image_lists(image_dir):
 
         random.shuffle(image_list[directory])
         no_of_images = len(image_list[directory])
-        print ('No. of %s files: %d' % (directory, no_of_images))
+        print('No. of %s files: %d' % (directory, no_of_images))
 
     return image_list
