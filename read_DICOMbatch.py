@@ -7,25 +7,28 @@ import numpy as np
 import glob, os
 import re
 
-# TODO : 1. finish next_batch function.
-# TODO : 2. finish zero_slice function.
+# TODO : 2. finish adapting zero_slice function in next_batch function.
+# TODO : 5. Consider Normalization of pixel values (when broadcasting int32 -> float64)
 
 class read_DICOM:
 
-    def __init__(self, dir_name='DICOM_data', contour_name='GTVp', remove_option=False, rotation=True, bitsampling=True):
+    def __init__(self, dir_name='DICOM_data', contour_name='GTVp', zero_slices=False, resize_shape=(227,227),
+                 rotation=True, rotation_angle=[90], bitsampling=True, bitsampling_bit=[4]):
         self.dir_name = dir_name
         self.contour_name = contour_name
-        self.remove_option = remove_option # Not taking account of the slices with no mask pixel
+        self.zero_slices = zero_slices # Not taking account of the slices with no mask pixel
 
-        self.batch_offset = 0
         self.file_index = 0
+        self.slice_index = 0
 
-        self.resize_shape = (227, 227)  # for VGG16 and VGG19. for inception, (299,299) used
-        self.num_channel = 3            # 3 channel input
+        self.resize_shape = resize_shape  # for VGG16 and VGG19. for inception, (299,299) used
+        self.num_channel = 3              # 3 channel input
 
         # Data Augmentation options
         self.rotation = rotation
+        self.rotation_angle = rotation_angle
         self.bitsampling = bitsampling
+        self.bitsampling_bit = bitsampling_bit
 
         mask_fname = []
         mask_index = []
@@ -66,7 +69,7 @@ class read_DICOM:
         _, mask, str_name = m2n.parsemask(self.dir_name + '/mask/' + self.mask_fname[self.file_index])
         mask = mask[self.mask_index[self.file_index]]
 
-        # Broadcasting from int32 to float64 is mandatory for resizing images!
+        # Broadcasting from int32 to float64/32(?) is mandatory for resizing images without pixel value change!
         image = np.float64(image)
         mask = np.float64(mask)
 
@@ -74,91 +77,102 @@ class read_DICOM:
 
         self.file_index += 1
 
-        # resize and make it 3 channel
-        image = dpp.resize_create3channel_3d(dcmimage=image,resize_shape=self.resize_shape,num_channel=3)
-        mask = dpp.resize_create3channel_3d(dcmimage=mask, resize_shape=self.resize_shape,num_channel=3)
+        # resize 2-D N number of image (N x width x height)
+        image = dpp.resize_3d(dcmimage=image, resize_shape=self.resize_shape)
+        mask = dpp.resize_3d(dcmimage=mask, resize_shape=self.resize_shape)
 
         return image, mask
 
+    def read_slice(self):
+        if self.slice_index > self.image.shape[1]:
+            self.file_index = self.file_index + 1
+            self.slice_index = 0
+            self.image, self.mask = self.read_file()
+            image_slice = self.image[self.slice_index]
+            mask_slice = self.mask[self.slice_index]
+        else:
+            image_slice = self.image[self.slice_index]
+            mask_slice = self.mask[self.slice_index]
+            self.slice_index = self.slice_index + 1
+
+        return image_slice, mask_slice
+
+
     # Data Augmentation function
-    def augment_img(self,img):
-        aug_img = img
-        # Rotation of 90, 180, 270
+    def augment_img(self,img,type='image'):
+        if not (type == 'image' or type == 'mask'):
+            print('Type should be either image or mask. The undefined type is not acceptable : ', type)
+            return
+
+
+        aug_img = img[np.newaxis,:,:]
+        # Rotation with given angles, apply both image and mask equally
         if self.rotation == True:
-            aug_img = np.append(aug_img, dpp.rotate(img,90),  axis=0)
-            aug_img = np.append(aug_img, dpp.rotate(img,180), axis=0)
-            aug_img = np.append(aug_img, dpp.rotate(img,270), axis=0)
-        # 4, 8 bit sampling
+            for i in range(len(self.rotation_angle)):
+                rotate_img = dpp.rotate(img,self.rotation_angle[i])
+                aug_img = np.append(aug_img, rotate_img[np.newaxis,:,:], axis=0)
+
+        # Bitsampling with given bits, apply only for image
         if self.bitsampling == True:
-            aug_img = np.append(aug_img, dpp.bitsampling(img, 4), axis=0)
-            aug_img = np.append(aug_img, dpp.bitsampling(img, 8), axis=0)
+            if type == 'image':
+                for i in range(len(self.bitsampling_bit)):
+                    bitsample_img = dpp.bitsampling(img, self.bitsampling_bit[i])
+                    aug_img = np.append(aug_img, bitsample_img[np.newaxis,:,:], axis=0)
+            elif type == 'mask':
+                for i in range(len(self.bitsampling_bit)):
+                    aug_img = np.append(aug_img, img[np.newaxis, :, :], axis=0)
 
-        # bit sampling and Rotation at the same time
+        # Bitsampling and Rotation at the same time
         if (self.rotation == True and self.bitsampling == True):
-            aug_img = np.append(aug_img, dpp.rotate(dpp.bitsampling(img,4),90),  axis=0)
-            aug_img = np.append(aug_img, dpp.rotate(dpp.bitsampling(img,4),180), axis=0)
-            aug_img = np.append(aug_img, dpp.rotate(dpp.bitsampling(img,4),270), axis=0)
-
-            aug_img = np.append(aug_img, dpp.rotate(dpp.bitsampling(img,8),90),  axis=0)
-            aug_img = np.append(aug_img, dpp.rotate(dpp.bitsampling(img,8),180), axis=0)
-            aug_img = np.append(aug_img, dpp.rotate(dpp.bitsampling(img,8),270), axis=0)
+            for i in range(len(self.rotation_angle)):
+                if type == 'image':
+                    for j in range(len(self.bitsampling_bit)):
+                        rotate_bitsample_img = dpp.rotate(dpp.bitsampling(img, self.bitsampling_bit[j]),
+                                                          self.rotation_angle[i])
+                        aug_img = np.append(aug_img, rotate_bitsample_img[np.newaxis,:,:], axis=0)
+                elif type == 'mask':
+                    for j in range(len(self.bitsampling_bit)):
+                        rotate_bitsample_img = dpp.rotate(img,self.rotation_angle[i])
+                        aug_img = np.append(aug_img, rotate_bitsample_img[np.newaxis, :, :], axis=0)
 
         return aug_img
 
 
-    # Remove the slices with no mask entries (optional)
+    # Remove the slices with no mask entries, NOT WORKING SOMEHOW!!!
     def zero_slices(self,slice_mask):
-        if sum(slice_mask.flatten()) == 0: # as its binary mask with 0 and 1, sum = 0 means there are no 'masked' pixels
-            return True
+        t = 0
+        if sum(slice_mask.flatten()) == 0.0: # as its binary mask with 0 and 1, sum = 0 means there are no 'masked' pixels
+            t = 1
         else:
-            return False
+            t = 0
 
-    # Set batch offset to be 0
-    def reset_batch_offset(self, offset=0):
-        self.batch_offset = offset
+        return t
 
-
-
-"""
-
+    # Returns the batch image and mask with given batch_size, as batch_size is defined as the number of original image before augmentation
     def next_batch(self, batch_size):
-        batch_img = []
-        batch_mask = []
+        index = 0
+        batch_img = 0
+        batch_mask = 0
 
-        if self.batch_offset > self.image.shape[0]:
+        while index < batch_size:
+            image_slice, mask_slice = self.read_slice()
+            zero_eval = sum(mask_slice.flatten())
 
+            # Zero slice adaptation
+            if zero_eval > 0:
+                image_aug = self.augment_img(img=image_slice,type='image')
+                mask_aug = self.augment_img(img=mask_slice,type='mask')
 
-        while len(batch_img) < batch_size:
-            slice_mask = self.mask_fname[self.slice_num]
-            if self.remove_option = True:
-                while zero_slices(slice_mask) == True:
-                    self.slice_num += 1
+                if index == 0:
+                    batch_img = image_aug
+                    batch_mask = mask_aug
                 else:
+                    batch_img = np.append(batch_img, image_aug, axis=0)
+                    batch_mask = np.append(batch_mask, mask_aug, axis=0)
 
+                index += 1
 
-            slice_img = self.image_fname[self.slice_num]
-            batch_img.append(slice_img)
-            batch_mask.append(slice_mask)
+        batch_img = dpp.create3channel_3d(dcmimage=batch_img,num_channel=3)
+        batch_mask = dpp.create3channel_3d(dcmimage=batch_mask, num_channel=3)
 
         return batch_img, batch_mask
-
-"""
-    # Return images and masks with the given batch size
-    def next_batch(self, batch_size):
-        start = self.batch_offset
-        self.batch_offset += batch_size
-        if self.batch_offset > self.batch_img.shape[0]:
-            # Finished epoch
-            self.epochs_completed += 1
-            print("****************** Epochs completed: " + str(self.epochs_completed) + "******************")
-            # Shuffle the data
-            perm = np.arange(self.images.shape[0])
-            np.random.shuffle(perm)
-            self.images = self.images[perm]
-            self.annotations = self.annotations[perm]
-            # Start next epoch
-            start = 0
-            self.batch_offset = batch_size
-
-        end = self.batch_offset
-        return self.images[start:end], self.annotations[start:end]
