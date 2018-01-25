@@ -11,7 +11,10 @@ resize_shape = (227,227)
 batch_size = 1
 
 total_batch_size = batch_size * (len(rotation_angle) + len(bitsampling_bit) + len(rotation_angle)*len(bitsampling_bit) + 1)
-b1 = batch.read_DICOM(dir_name="DICOM_data", contour_name='GTVp', resize_shape=resize_shape, rotation=True,
+#b1 = batch.read_DICOM(dir_name="DICOM_data", contour_name='GTVp', resize_shape=resize_shape, rotation=True,
+#                      rotation_angle=rotation_angle, bitsampling=True, bitsampling_bit=bitsampling_bit)
+
+b1 = batch.read_DICOM(dir_name="AQA", contour_name='External', resize_shape=resize_shape, rotation=True,
                       rotation_angle=rotation_angle, bitsampling=True, bitsampling_bit=bitsampling_bit)
 
 img, mask = b1.next_batch(batch_size=batch_size)
@@ -20,7 +23,7 @@ img3, mask3 = b1.next_batch(batch_size=batch_size)
 
 
 print(img.shape, mask.shape)
-
+print(img.flatten().max(), img.flatten().min())
 
 plt.figure(2)
 plt.subplot(231)
