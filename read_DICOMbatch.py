@@ -192,8 +192,8 @@ class read_DICOM:
 
                 index += 1
 
-        batch_img = dpp.create3channel_3d(dcmimage=batch_img,num_channel=3)
-        batch_mask = batch_mask[:,:,:,np.newaxis]
+        batch_img = dpp.create3channel_3d(dcmimage=batch_img,num_channel=3) # (N, Width, Height, 3)
+        batch_mask = batch_mask[:,:,:,np.newaxis] # (N, Width, Height, 1)
 
         # return float32 format as its the input of tensorflow (?) CHECK!
         return np.float32(batch_img), np.float32(batch_mask)
