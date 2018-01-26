@@ -4,9 +4,11 @@ import numpy as np
 
 import TensorflowUtils as utils
 import read_MITSceneParsingData as scene_parsing
+import read_DICOMbatch as dicom_batch
 import datetime
 import BatchDatsetReader as dataset
 from six.moves import xrange
+import time
 
 FLAGS = tf.flags.FLAGS
 tf.flags.DEFINE_integer("batch_size", "2", "batch size for training")
@@ -19,7 +21,7 @@ tf.flags.DEFINE_string('mode', "train", "Mode train/ test/ visualize")
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
 
-MAX_ITERATION = int(1e5 + 1)
+MAX_ITERATION = int(20)
 NUM_OF_CLASSESS = 151
 IMAGE_SIZE = 224
 
@@ -48,7 +50,7 @@ def vgg_net(weights, image):
             kernels, bias = weights[i][0][0][0][0]
             # matconvnet: weights are [width, height, in_channels, out_channels]
             # tensorflow: weights are [height, width, in_channels, out_channels]
-            kernels = utils.get_variable(np.transpose(kernels, (1, 0, 2, 3)), name=name + "_w")
+            kernels = utils.get_variable(np.transpose(kernels, (1, 0, 2, 3)), name=name + "_w",)
             bias = utils.get_variable(bias.reshape(-1), name=name + "_b")
             current = utils.conv2d_basic(current, kernels, bias)
         elif kind == 'relu':
@@ -85,6 +87,7 @@ def inference(image, keep_prob):
 
         pool5 = utils.max_pool_2x2(conv_final_layer)
 
+    with tf.variable_scope("FCN"):
         W6 = utils.weight_variable([7, 7, 512, 4096], name="W6")
         b6 = utils.bias_variable([4096], name="b6")
         conv6 = utils.conv2d_basic(pool5, W6, b6)
@@ -156,7 +159,12 @@ def main(argv=None):
                                                                           name="entropy")))
     tf.summary.scalar("entropy", loss)
 
-    trainable_var = tf.trainable_variables()
+    scope_name = 'inference'
+    total_var = tf.trainable_variables()
+
+    trainable_var = [var for var in total_var if scope_name in var.name]
+    #trainable_var = total_var
+
     if FLAGS.debug:
         for var in trainable_var:
             utils.add_to_regularization_and_summary(var)
@@ -165,18 +173,44 @@ def main(argv=None):
     print("Setting up summary op...")
     summary_op = tf.summary.merge_all()
 
+
+#    for variable in trainable_var:
+#        print(variable)
+
+
+
+    #Way to count the number of variables + print variable names
+    """
+    total_parameters = 0
+    for variable in trainable_var:
+        # shape is an array of tf.Dimension
+        print(variable)
+        shape = variable.get_shape()
+        print(shape)
+        print(len(shape))
+        variable_parameters = 1
+        for dim in shape:
+            print(dim)
+            variable_parameters *= dim.value
+        print(variable_parameters)
+        total_parameters += variable_parameters
+    print("Total # of parameters : ", total_parameters)
+
+    """
     print("Setting up image reader...")
-    train_records, valid_records = scene_parsing.read_dataset(FLAGS.data_dir)
-    print(len(train_records))
-    print(len(valid_records))
+    rotation_angle = [-10,10]
+    bitsampling_bit = [4, 8]
+    resize_shape = (224, 224)
+    dicom_records = dicom_batch.read_DICOM(dir_name="AQA", contour_name='External', resize_shape=resize_shape, rotation=True,
+                      rotation_angle=rotation_angle, bitsampling=True, bitsampling_bit=bitsampling_bit)
+    validation_records = dicom_batch.read_DICOM(dir_name="AQA", contour_name='External', resize_shape=resize_shape,
+                                           rotation=True,
+                                           rotation_angle=rotation_angle, bitsampling=True,
+                                           bitsampling_bit=bitsampling_bit)
 
-    print("Setting up dataset reader")
-    image_options = {'resize': True, 'resize_size': IMAGE_SIZE}
-    if FLAGS.mode == 'train':
-        train_dataset_reader = dataset.BatchDatset(train_records, image_options)
-    validation_dataset_reader = dataset.BatchDatset(valid_records, image_options)
 
-    sess = tf.Session()
+    #sess = tf.Session()
+    sess = tf.Session(config=tf.ConfigProto(device_count={'GPU': 0})) # CPU ONLY
 
     print("Setting up Saver...")
     saver = tf.train.Saver()
@@ -189,25 +223,33 @@ def main(argv=None):
         print("Model restored...")
 
     if FLAGS.mode == "train":
-        for itr in xrange(MAX_ITERATION):
-            train_images, train_annotations = train_dataset_reader.next_batch(FLAGS.batch_size)
+        start = time.time()
+        # for itr in xrange(MAX_ITERATION):
+        for itr in xrange(10):
+            train_images, train_annotations = dicom_records.next_batch(batch_size=1)
             feed_dict = {image: train_images, annotation: train_annotations, keep_probability: 0.85}
-            print(train_images.shape, train_annotations.shape)
 
             sess.run(train_op, feed_dict=feed_dict)
 
-            if itr % 10 == 0:
+            if itr % 5 == 0:
                 train_loss, summary_str = sess.run([loss, summary_op], feed_dict=feed_dict)
                 print("Step: %d, Train_loss:%g" % (itr, train_loss))
                 summary_writer.add_summary(summary_str, itr)
 
-            if itr % 500 == 0:
-                valid_images, valid_annotations = validation_dataset_reader.next_batch(FLAGS.batch_size)
+            if itr % 10 == 0:
+                valid_images, valid_annotations = validation_records.next_batch(batch_size=1)
                 valid_loss = sess.run(loss, feed_dict={image: valid_images, annotation: valid_annotations,
                                                        keep_probability: 1.0})
                 print("%s ---> Validation_loss: %g" % (datetime.datetime.now(), valid_loss))
-                saver.save(sess, FLAGS.logs_dir + "model.ckpt", itr)
+                #saver.save(sess, FLAGS.logs_dir + "model.ckpt", itr+1)
 
+            end = time.time()
+            print("Iteration #", itr+1, ",", np.int32(end - start), "s")
+
+    saver.save(sess, FLAGS.logs_dir + "model.ckpt", itr+1)
+
+
+"""
     elif FLAGS.mode == "visualize":
         valid_images, valid_annotations = validation_dataset_reader.get_random_batch(FLAGS.batch_size)
         pred = sess.run(pred_annotation, feed_dict={image: valid_images, annotation: valid_annotations,
@@ -220,7 +262,7 @@ def main(argv=None):
             utils.save_image(valid_annotations[itr].astype(np.uint8), FLAGS.logs_dir, name="gt_" + str(5+itr))
             utils.save_image(pred[itr].astype(np.uint8), FLAGS.logs_dir, name="pred_" + str(5+itr))
             print("Saved image: %d" % itr)
-
+"""
 
 if __name__ == "__main__":
     tf.app.run()

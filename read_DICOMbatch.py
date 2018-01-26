@@ -67,9 +67,9 @@ class read_DICOM:
 
     # read dicom file with the next iterator (resized and 3 channeled)
     def read_file(self):
-        print(self.dir_name)
-        print(self.file_index)
-        print(len(self.image_fname))
+        #print(self.dir_name)
+        #print(self.file_index)
+        #print(len(self.image_fname))
         image = m2n.loadimage(self.dir_name + '/image/' + self.image_fname[self.file_index])
         _, mask, str_name = m2n.parsemask(self.dir_name + '/mask/' + self.mask_fname[self.file_index])
         mask = mask[self.mask_index[self.file_index]]
@@ -158,7 +158,6 @@ class read_DICOM:
         bin_size = (self.voxel_range.max() - self.voxel_range.min())/(self.normalization_range.max() - self.normalization_range.min())
         image = image - self.voxel_range.min()
         image = np.matrix.round(image / bin_size)
-        print("max and min of image : ", bin_size, image.flatten().max(), image.flatten().min())
 
         return image
 
@@ -176,7 +175,6 @@ class read_DICOM:
             # Zero slice adaptation
             if zero_eval > 0:
                 # Any voxel bigger than 1000 would be 1000, less than -1000 would be -1000
-                print("max and min before : ", image_slice.flatten().max(), image_slice.flatten().min())
                 image_slice[image_slice > self.voxel_range.max()] = self.voxel_range.max()
                 image_slice[image_slice < self.voxel_range.min()] = self.voxel_range.min()
                 # Normalization of pixels from the given range (0,255)
@@ -195,7 +193,7 @@ class read_DICOM:
                 index += 1
 
         batch_img = dpp.create3channel_3d(dcmimage=batch_img,num_channel=3)
-        batch_mask = dpp.create3channel_3d(dcmimage=batch_mask, num_channel=3)
+        batch_mask = batch_mask[:,:,:,np.newaxis]
 
         # return float32 format as its the input of tensorflow (?) CHECK!
         return np.float32(batch_img), np.float32(batch_mask)
