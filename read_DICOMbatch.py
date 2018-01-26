@@ -12,7 +12,7 @@ import re
 
 class read_DICOM:
 
-    def __init__(self, dir_name='DICOM_data', contour_name='GTVp', zero_slices=False, resize_shape=(227,227),
+    def __init__(self, dir_name='DICOM_data/training_set', contour_name='mandible', zero_slices=False, resize_shape=(227,227),
                  rotation=True, rotation_angle=[90], bitsampling=True, bitsampling_bit=[4]):
         self.voxel_range = np.array([-1000,1000]) # any voxel bigger than 1000 would be 1000, less than -1000 would be -1000
         self.normalization_range = np.array([0,255])
@@ -40,7 +40,7 @@ class read_DICOM:
             num_str, mask, name = m2n.parsemask(file)
 
             for i in range(num_str):
-                if name[i] == self.contour_name:
+                if name[i][0].lower() == self.contour_name:
                     mask_index.append(i)
                     mask_fname.append(os.path.basename(file))
                     break
@@ -70,6 +70,7 @@ class read_DICOM:
         #print(self.dir_name)
         #print(self.file_index)
         #print(len(self.image_fname))
+
         image = m2n.loadimage(self.dir_name + '/image/' + self.image_fname[self.file_index])
         _, mask, str_name = m2n.parsemask(self.dir_name + '/mask/' + self.mask_fname[self.file_index])
         mask = mask[self.mask_index[self.file_index]]

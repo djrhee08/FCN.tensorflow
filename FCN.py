@@ -178,7 +178,6 @@ def main(argv=None):
 #        print(variable)
 
 
-
     #Way to count the number of variables + print variable names
     """
     total_parameters = 0
@@ -198,19 +197,22 @@ def main(argv=None):
 
     """
     print("Setting up image reader...")
-    rotation_angle = [-10,10]
+    dir_name='DICOM_data/mandible/'
+    contour_name='mandible'
+
+    rotation_angle = [-10,-5,5,10]
     bitsampling_bit = [4, 8]
     resize_shape = (224, 224)
-    dicom_records = dicom_batch.read_DICOM(dir_name="AQA", contour_name='External', resize_shape=resize_shape, rotation=True,
-                      rotation_angle=rotation_angle, bitsampling=True, bitsampling_bit=bitsampling_bit)
-    validation_records = dicom_batch.read_DICOM(dir_name="AQA", contour_name='External', resize_shape=resize_shape,
-                                           rotation=True,
-                                           rotation_angle=rotation_angle, bitsampling=True,
-                                           bitsampling_bit=bitsampling_bit)
+    dicom_records = dicom_batch.read_DICOM(dir_name=dir_name+'training_set', contour_name=contour_name, resize_shape=resize_shape,
+                                           rotation=True, rotation_angle=rotation_angle,
+                                           bitsampling=False, bitsampling_bit=bitsampling_bit)
+    validation_records = dicom_batch.read_DICOM(dir_name=dir_name+'validation_set', contour_name=contour_name, resize_shape=resize_shape,
+                                           rotation=True, rotation_angle=rotation_angle,
+                                           bitsampling=False, bitsampling_bit=bitsampling_bit)
 
 
-    #sess = tf.Session()
-    sess = tf.Session(config=tf.ConfigProto(device_count={'GPU': 0})) # CPU ONLY
+    sess = tf.Session()
+    #sess = tf.Session(config=tf.ConfigProto(device_count={'GPU': 0})) # CPU ONLY
 
     print("Setting up Saver...")
     saver = tf.train.Saver()
@@ -224,45 +226,53 @@ def main(argv=None):
 
     if FLAGS.mode == "train":
         start = time.time()
+        train_loss_list = []
+        validation_loss_list = []
         # for itr in xrange(MAX_ITERATION):
-        for itr in xrange(10):
+        for itr in xrange(3500): # about 20 hours of work
             train_images, train_annotations = dicom_records.next_batch(batch_size=1)
             feed_dict = {image: train_images, annotation: train_annotations, keep_probability: 0.85}
 
             sess.run(train_op, feed_dict=feed_dict)
 
-            if itr % 5 == 0:
+            if itr % 50 == 0:
                 train_loss, summary_str = sess.run([loss, summary_op], feed_dict=feed_dict)
                 print("Step: %d, Train_loss:%g" % (itr, train_loss))
+                train_loss_list.append(train_loss)
                 summary_writer.add_summary(summary_str, itr)
 
-            if itr % 10 == 0:
+            if itr % 100 == 0:
                 valid_images, valid_annotations = validation_records.next_batch(batch_size=1)
                 valid_loss = sess.run(loss, feed_dict={image: valid_images, annotation: valid_annotations,
                                                        keep_probability: 1.0})
                 print("%s ---> Validation_loss: %g" % (datetime.datetime.now(), valid_loss))
+                validation_loss_list.append(valid_loss)
                 #saver.save(sess, FLAGS.logs_dir + "model.ckpt", itr+1)
 
             end = time.time()
             print("Iteration #", itr+1, ",", np.int32(end - start), "s")
 
-    saver.save(sess, FLAGS.logs_dir + "model.ckpt", itr+1)
+        saver.save(sess, FLAGS.logs_dir + "model.ckpt", itr+1)
+        print("train_loss_list : ", train_loss_list)
+        print("validation_loss_list : ", validation_loss_list)
 
 
-"""
     elif FLAGS.mode == "visualize":
-        valid_images, valid_annotations = validation_dataset_reader.get_random_batch(FLAGS.batch_size)
+        valid_images, valid_annotations = validation_records.next_batch(batch_size=1)
         pred = sess.run(pred_annotation, feed_dict={image: valid_images, annotation: valid_annotations,
                                                     keep_probability: 1.0})
         valid_annotations = np.squeeze(valid_annotations, axis=3)
         pred = np.squeeze(pred, axis=3)
 
-        for itr in range(FLAGS.batch_size):
+        # Save the image for display. Use matplotlib to draw this.
+        for itr in range(1):
             utils.save_image(valid_images[itr].astype(np.uint8), FLAGS.logs_dir, name="inp_" + str(5+itr))
             utils.save_image(valid_annotations[itr].astype(np.uint8), FLAGS.logs_dir, name="gt_" + str(5+itr))
             utils.save_image(pred[itr].astype(np.uint8), FLAGS.logs_dir, name="pred_" + str(5+itr))
             print("Saved image: %d" % itr)
-"""
+
+
+    # Need to add another mode to draw the contour based on image only.
 
 if __name__ == "__main__":
     tf.app.run()
