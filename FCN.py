@@ -200,7 +200,7 @@ def main(argv=None):
     dir_name='DICOM_data/mandible/'
     contour_name='mandible'
 
-    batch_size = 10
+    batch_size = 3
     rotation = True
     rotation_angle = [-10,-5,5,10]
     bitsampling = False
