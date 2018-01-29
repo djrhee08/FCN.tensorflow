@@ -219,7 +219,7 @@ def main(argv=None):
 
     print("Setting up Saver...")
     saver = tf.train.Saver()
-    summary_writer = tf.summary.FileWriter(FLAGS.logs_dir, sess.graph)
+    #summary_writer = tf.summary.FileWriter(FLAGS.logs_dir, sess.graph)
 
     sess.run(tf.global_variables_initializer())
     ckpt = tf.train.get_checkpoint_state(FLAGS.logs_dir)
@@ -232,7 +232,7 @@ def main(argv=None):
         train_loss_list = []
         validation_loss_list = []
         # for itr in xrange(MAX_ITERATION):
-        for itr in xrange(3500): # about 20 hours of work
+        for itr in xrange(1200): # about 18 hours of work
             train_images, train_annotations = dicom_records.next_batch(batch_size=batch_size)
             feed_dict = {image: train_images, annotation: train_annotations, keep_probability: 0.85}
 
@@ -242,14 +242,16 @@ def main(argv=None):
                 train_loss, summary_str = sess.run([loss, summary_op], feed_dict=feed_dict)
                 print("Step: %d, Train_loss:%g" % (itr, train_loss))
                 train_loss_list.append(train_loss)
-                summary_writer.add_summary(summary_str, itr)
+                #summary_writer.add_summary(summary_str, itr)
 
-            if (itr+1) % 100 == 0:
+            if (itr+1) % 50 == 0:
                 valid_images, valid_annotations = validation_records.next_batch(batch_size=batch_size)
                 valid_loss = sess.run(loss, feed_dict={image: valid_images, annotation: valid_annotations,
                                                        keep_probability: 1.0})
                 print("%s ---> Validation_loss: %g" % (datetime.datetime.now(), valid_loss))
                 validation_loss_list.append(valid_loss)
+
+            if (itr+1) % 200 == 0:
                 saver.save(sess, FLAGS.logs_dir + "model.ckpt", itr+1)
 
             end = time.time()
