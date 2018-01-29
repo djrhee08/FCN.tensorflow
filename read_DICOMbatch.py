@@ -62,6 +62,7 @@ class read_DICOM:
         self.image_fname = image_fname
         self.mask_fname = mask_fname
         self.mask_index = mask_index
+        self.num_files = len(mask_fname)
 
         self.image, self.mask = self.read_file()
 
@@ -90,8 +91,14 @@ class read_DICOM:
         return image, mask
 
     def read_slice(self):
-        if self.slice_index > self.image.shape[1]:
+        if self.slice_index >= self.image.shape[0]: # not '>' but '>=' because shape slice_index starts from 0
             self.file_index = self.file_index + 1
+
+            # When the images are all used, go back to the first image again!
+            if self.file_index >= self.num_files:
+                print('Files are all used. Move back to the first image')
+                self.file_index = 0
+
             self.slice_index = 0
             self.image, self.mask = self.read_file()
             image_slice = self.image[self.slice_index]
@@ -170,6 +177,7 @@ class read_DICOM:
         batch_mask = 0
 
         while index < batch_size:
+            #print("index, batch_size : ", index, batch_size)
             image_slice, mask_slice = self.read_slice()
 
             zero_eval = sum(mask_slice.flatten())

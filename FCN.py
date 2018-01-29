@@ -200,14 +200,17 @@ def main(argv=None):
     dir_name='DICOM_data/mandible/'
     contour_name='mandible'
 
+    batch_size = 10
+    rotation = True
     rotation_angle = [-10,-5,5,10]
+    bitsampling = False
     bitsampling_bit = [4, 8]
     resize_shape = (224, 224)
     dicom_records = dicom_batch.read_DICOM(dir_name=dir_name+'training_set', contour_name=contour_name, resize_shape=resize_shape,
-                                           rotation=True, rotation_angle=rotation_angle,
-                                           bitsampling=False, bitsampling_bit=bitsampling_bit)
+                                           rotation=rotation, rotation_angle=rotation_angle,
+                                           bitsampling=bitsampling, bitsampling_bit=bitsampling_bit)
     validation_records = dicom_batch.read_DICOM(dir_name=dir_name+'validation_set', contour_name=contour_name, resize_shape=resize_shape,
-                                           rotation=True, rotation_angle=rotation_angle,
+                                           rotation=False, rotation_angle=rotation_angle,
                                            bitsampling=False, bitsampling_bit=bitsampling_bit)
 
 
@@ -230,24 +233,24 @@ def main(argv=None):
         validation_loss_list = []
         # for itr in xrange(MAX_ITERATION):
         for itr in xrange(3500): # about 20 hours of work
-            train_images, train_annotations = dicom_records.next_batch(batch_size=1)
+            train_images, train_annotations = dicom_records.next_batch(batch_size=batch_size)
             feed_dict = {image: train_images, annotation: train_annotations, keep_probability: 0.85}
 
             sess.run(train_op, feed_dict=feed_dict)
 
-            if itr % 50 == 0:
+            if (itr+1) % 50 == 0:
                 train_loss, summary_str = sess.run([loss, summary_op], feed_dict=feed_dict)
                 print("Step: %d, Train_loss:%g" % (itr, train_loss))
                 train_loss_list.append(train_loss)
                 summary_writer.add_summary(summary_str, itr)
 
-            if itr % 100 == 0:
-                valid_images, valid_annotations = validation_records.next_batch(batch_size=1)
+            if (itr+1) % 100 == 0:
+                valid_images, valid_annotations = validation_records.next_batch(batch_size=batch_size)
                 valid_loss = sess.run(loss, feed_dict={image: valid_images, annotation: valid_annotations,
                                                        keep_probability: 1.0})
                 print("%s ---> Validation_loss: %g" % (datetime.datetime.now(), valid_loss))
                 validation_loss_list.append(valid_loss)
-                #saver.save(sess, FLAGS.logs_dir + "model.ckpt", itr+1)
+                saver.save(sess, FLAGS.logs_dir + "model.ckpt", itr+1)
 
             end = time.time()
             print("Iteration #", itr+1, ",", np.int32(end - start), "s")
@@ -258,7 +261,7 @@ def main(argv=None):
 
 
     elif FLAGS.mode == "visualize":
-        valid_images, valid_annotations = validation_records.next_batch(batch_size=1)
+        valid_images, valid_annotations = validation_records.next_batch(batch_size=batch_size)
         pred = sess.run(pred_annotation, feed_dict={image: valid_images, annotation: valid_annotations,
                                                     keep_probability: 1.0})
         valid_annotations = np.squeeze(valid_annotations, axis=3)

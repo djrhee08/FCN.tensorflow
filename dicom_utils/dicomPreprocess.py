@@ -20,8 +20,8 @@ def create3channel_2d(dcmimage, num_channel=3):
     return np.repeat(dcmimage[:,:,np.newaxis],3,axis=2)
 
 # For 3-D (N x width x height) image batch ------------------------------------------------
-# Reduce dicom size from N x 512 x 512 to N x 227 x 227
-def resize_3d(dcmimage, resize_shape=(227,227), num_channel=3):
+# Reduce dicom size from N x 512 x 512 to N x 224 x 224
+def resize_3d(dcmimage, resize_shape=(224,224), num_channel=3):
     if dcmimage.shape[1] != 512 or dcmimage.shape[2] != 512:
         print(dcmimage.shape[1], dcmimage.shape[2], " is the shape of your input, not 512 X 512. Please check again!")
         return
