@@ -1,5 +1,5 @@
 import numpy as np
-import read_DICOMbatch as batch
+import read_DICOMbatchImageOnly as dicom_batchImage
 import dicom_utils.mat2numpy as m2n
 import dicom_utils.dicomPreprocess as dpp
 import matplotlib.pyplot as plt
@@ -7,16 +7,34 @@ import matplotlib.pyplot as plt
 rotation_angle = [90, 180, 270]
 bitsampling_bit = [4,8]
 
-resize_shape = (227,227)
+resize_shape = (224,224)
+crop_shape = resize_shape
 batch_size = 1
 
-total_batch_size = batch_size * (len(rotation_angle) + len(bitsampling_bit) + len(rotation_angle)*len(bitsampling_bit) + 1)
-#b1 = batch.read_DICOM(dir_name="DICOM_data", contour_name='GTVp', resize_shape=resize_shape, rotation=True,
-#                      rotation_angle=rotation_angle, bitsampling=True, bitsampling_bit=bitsampling_bit)
 
-b1 = batch.read_DICOM(dir_name="AQA", contour_name='External', resize_shape=resize_shape, rotation=True,
-                      rotation_angle=rotation_angle, bitsampling=True, bitsampling_bit=bitsampling_bit)
+img_dir_name = '..\H&N_CTONLY'
+dicom_records = dicom_batchImage.read_DICOMbatchImage(dir_name=img_dir_name, opt_resize=True, resize_shape=(224,224),
+                                            opt_crop=False, crop_shape=(224,224))
 
+
+valid_images = dicom_records.next_batch(batch_size=4)
+
+print(valid_images.shape)
+plt.subplot(2,2,1)
+plt.imshow(valid_images[0,:,:,0],cmap="gray")
+
+plt.subplot(2,2,2)
+plt.imshow(valid_images[1,:,:,0],cmap="gray")
+
+plt.subplot(2,2,3)
+plt.imshow(valid_images[2,:,:,0],cmap="gray")
+
+plt.subplot(2,2,4)
+plt.imshow(valid_images[3,:,:,0],cmap="gray")
+plt.show()
+
+
+"""
 img, mask = b1.next_batch(batch_size=batch_size)
 img2, mask2 = b1.next_batch(batch_size=batch_size)
 img3, mask3 = b1.next_batch(batch_size=batch_size)
@@ -40,7 +58,7 @@ plt.subplot(236)
 plt.imshow(mask3[0,:,:,2],cmap='gray')
 plt.show()
 
-"""
+
 a = mask3[36,:,:,0]
 b = mask3[40,:,:,0]
 c = mask3[41,:,:,0]

@@ -6,24 +6,29 @@ import matplotlib.pyplot as plt
 import numpy as np
 import glob, os
 import re
+import random
 
 # TODO : 2. (0,255) Normalization + CT Number really 0 in water ?
 # TODO : 5. Check if broadcasting changes value (float64 -> float32)
 
 class read_DICOM:
 
-    def __init__(self, dir_name='DICOM_data/training_set', contour_name='mandible', zero_slices=False, resize_shape=(227,227),
+    def __init__(self, dir_name='DICOM_data/training_set', contour_name='mandible', zero_slices=False, opt_resize=True,
+                 resize_shape=(224,224), opt_crop=False, crop_shape=(224,224),
                  rotation=True, rotation_angle=[90], bitsampling=True, bitsampling_bit=[4]):
-        self.voxel_range = np.array([-1000,1000]) # any voxel bigger than 1000 would be 1000, less than -1000 would be -1000
+        self.voxel_range = np.array([0,3000]) # any voxel bigger than 3000 would be 3000, less than 0 would be 0
         self.normalization_range = np.array([0,255])
         self.dir_name = dir_name
-        self.contour_name = contour_name
         self.zero_slices = zero_slices # Not taking account of the slices with no mask pixel
 
         self.file_index = 0
         self.slice_index = 0
 
+        self.opt_resize = opt_resize
         self.resize_shape = resize_shape  # for VGG16 and VGG19. for inception, (299,299) used
+        self.opt_crop = opt_crop
+        self.crop_shape = crop_shape
+
         self.num_channel = 3              # 3 channel input
 
         # Data Augmentation options
@@ -35,12 +40,12 @@ class read_DICOM:
         mask_fname = []
         mask_index = []
 
-        # Only choose the dataset with given contour name
+        # Only choose the dataset with given contour name & exclude the
         for file in glob.glob(self.dir_name + "/mask/*.mat"):
             num_str, mask, name = m2n.parsemask(file)
 
             for i in range(num_str):
-                if name[i][0].lower() == self.contour_name:
+                if contour_name in name[i][0].lower():
                     mask_index.append(i)
                     mask_fname.append(os.path.basename(file))
                     break
@@ -64,6 +69,10 @@ class read_DICOM:
         self.mask_index = mask_index
         self.num_files = len(mask_fname)
 
+        # Randomize the order of data
+        self.random_batch = random.sample(range(0,self.num_files),self.num_files )
+        print("random_batch: ", self.random_batch)
+
         self.image, self.mask = self.read_file()
 
     # read dicom file with the next iterator (resized and 3 channeled)
@@ -71,24 +80,37 @@ class read_DICOM:
         #print(self.dir_name)
         #print(self.file_index)
         #print(len(self.image_fname))
+        print(self.image_fname[self.random_batch[self.file_index]])
 
-        image = m2n.loadimage(self.dir_name + '/image/' + self.image_fname[self.file_index])
-        _, mask, str_name = m2n.parsemask(self.dir_name + '/mask/' + self.mask_fname[self.file_index])
-        mask = mask[self.mask_index[self.file_index]]
+        image = m2n.loadimage(self.dir_name + '/image/' + self.image_fname[self.random_batch[self.file_index]])
+        _, mask, str_name = m2n.parsemask(self.dir_name + '/mask/' + self.mask_fname[self.random_batch[self.file_index]])
+        mask = mask[self.mask_index[self.random_batch[self.file_index]]]
 
         # Broadcasting from int32 to float64/32(?) is mandatory for resizing images without pixel value change!
         image = np.float64(image)
         mask = np.float64(mask)
 
-        print(str_name[self.mask_index[self.file_index]])
+        print(str_name[self.mask_index[self.random_batch[self.file_index]]])
 
         self.file_index += 1
 
+        if self.opt_resize == True and self.opt_crop == True:
+            print("Both resize and crop are selected. Please choose either one")
+
         # resize 2-D N number of image (N x width x height)
-        image = dpp.resize_3d(dcmimage=image, resize_shape=self.resize_shape)
-        mask = dpp.resize_3d(dcmimage=mask, resize_shape=self.resize_shape)
+        if self.opt_resize == True:
+            print("image is resized")
+            image = dpp.resize_3d(dcmimage=image, resize_shape=self.resize_shape)
+            mask = dpp.resize_3d(dcmimage=mask, resize_shape=self.resize_shape)
+
+        # crop 2-D N number of image (N x width x height)
+        if self.opt_crop == True:
+            print("image is cropped")
+            image = dpp.crop_3d(dcmimage=image, crop_shape=self.crop_shape)
+            mask = dpp.crop_3d(dcmimage=mask, crop_shape=self.crop_shape)
 
         return image, mask
+
 
     def read_slice(self):
         if self.slice_index >= self.image.shape[0]: # not '>' but '>=' because shape slice_index starts from 0
@@ -183,7 +205,7 @@ class read_DICOM:
             zero_eval = sum(mask_slice.flatten())
             # Zero slice adaptation
             if zero_eval > 0:
-                # Any voxel bigger than 1000 would be 1000, less than -1000 would be -1000
+                # Any voxel bigger than 3000 would be 3000, less than 0 would be 0
                 image_slice[image_slice > self.voxel_range.max()] = self.voxel_range.max()
                 image_slice[image_slice < self.voxel_range.min()] = self.voxel_range.min()
                 # Normalization of pixels from the given range (0,255)
