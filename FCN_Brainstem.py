@@ -20,8 +20,8 @@ tf.flags.DEFINE_string("data_dir", "Data_zoo/MIT_SceneParsing/", "path to datase
 tf.flags.DEFINE_float("learning_rate", "1e-4", "Learning rate for Adam Optimizer")
 tf.flags.DEFINE_string("model_dir", "Model_zoo/", "Path to vgg model mat")
 tf.flags.DEFINE_bool('debug', "False", "Debug mode: True/ False")
-tf.flags.DEFINE_string('mode', "test", "Mode train/ test/ visualize")
-tf.flags.DEFINE_string('optimization', "softmax", "optimization mode: softmax/ dice")
+tf.flags.DEFINE_string('mode', "train", "Mode train/ test/ visualize")
+tf.flags.DEFINE_string('optimization', "dice", "optimization mode: cross_entropy/ dice")
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
 
@@ -31,6 +31,8 @@ IMAGE_SIZE = 224
 
 def dice(mask1, mask2, smooth=1e-5):
     print(mask1.shape, mask2.shape)
+    mask1 = mask1 / (mask1.flatten().max())
+    mask2 = mask2 / (mask2.flatten().max())
     mul = mask1 * mask2
     inse = np.sum(mul.flatten())
 
@@ -153,10 +155,10 @@ def inference(image, keep_prob):
 def train(loss_val, var_list):
     optimizer = tf.train.AdamOptimizer(FLAGS.learning_rate)
     grads = optimizer.compute_gradients(loss_val, var_list=var_list)
-    if FLAGS.debug:
+    #if FLAGS.debug:
         # print(len(var_list))
-        for grad, var in grads:
-            utils.add_gradient_summary(grad, var)
+    #    for grad, var in grads:
+    #        utils.add_gradient_summary(grad, var)
     return optimizer.apply_gradients(grads)
 
 
@@ -164,20 +166,26 @@ def main(argv=None):
     keep_probability = tf.placeholder(tf.float32, name="keep_probabilty")
     image = tf.placeholder(tf.float32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 3], name="input_image")
 
-    if FLAGS.optimization == "softmax":
+    if FLAGS.optimization == "cross_entropy":
         annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")   # For softmax
         pred_annotation, logits = inference(image, keep_probability)
         print("pred_annotation, logits shape", pred_annotation.get_shape().as_list(), logits.get_shape().as_list())
-        loss = tf.reduce_mean((tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=tf.squeeze(annotation, squeeze_dims=[3]),name="entropy"))) # For softmax
+
+        label = tf.squeeze(annotation, squeeze_dims=[3])
+        smax = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label,name="entropy")
+        loss = tf.reduce_mean(smax) # For softmax
+        print("label, annotation, smax shape", label.get_shape().as_list(), annotation.get_shape().as_list(), smax.get_shape().as_list())
+
+        #loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=tf.squeeze(annotation, squeeze_dims=[3]),name="entropy"))  # For softmax
+
     elif FLAGS.optimization == "dice":
-        annotation = tf.placeholder(tf.float32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation") # For DICE
+        annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")  # For softmax
         pred_annotation, logits = inference(image, keep_probability)
-        print("pred_annotation, logits shape", pred_annotation.get_shape().as_list(), logits.get_shape().as_list())
 
         # pred_annotation (argmax) is not differentiable so it cannot be optimized. So in loss, we need to use logits instead of pred_annotation!
-        logits = tl.activation.pixel_wise_softmax(logits)  # For DICE
-        loss = 1 - tl.cost.dice_coe(output=logits, target=annotation)  # ,loss_type='sorensen') # For DICE
-
+        label = tf.squeeze(annotation, squeeze_dims=[3])
+        smax = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label,name="entropy")
+        loss = 1 - tl.cost.dice_coe(smax, tf.cast(label,dtype=tf.float32), axis=None)
 
 
     total_var = tf.trainable_variables()
@@ -294,7 +302,7 @@ def main(argv=None):
                 validation_loss_list.append(valid_loss)
                 x_validation.append(itr+1)
 
-            if (itr+1) % 3000 == 0:
+            if (itr+1) % 2000 == 0:
                 saver.save(sess, FLAGS.logs_dir + "model.ckpt", itr+1)
 
             end = time.time()
@@ -324,8 +332,8 @@ def main(argv=None):
         test_batch_size = 10
         test_index = 5
         ind = 0
-        test_records = dicom_batchImage.read_DICOMbatchImage(dir_name=img_dir_name, opt_resize=False,
-                                                             resize_shape=resize_shape, opt_crop=True, crop_shape=crop_shape)
+        test_records = dicom_batchImage.read_DICOMbatchImage(dir_name=img_dir_name, opt_resize=opt_resize,
+                                                             resize_shape=resize_shape, opt_crop=opt_crop, crop_shape=crop_shape)
 
         test_annotations = np.zeros([test_batch_size,224,224,1]) # fake input
 
@@ -380,9 +388,9 @@ def main(argv=None):
             valid_annotations = np.squeeze(valid_annotations, axis=3)
             pred = np.squeeze(pred, axis=3)
 
-            #print(valid_images.shape, valid_annotations.shape, pred.shape)
+            print(valid_images.shape, valid_annotations.shape, pred.shape)
 
-            dice_coeff = dice(valid_annotations, pred)
+            dice_coeff = dice(valid_annotations[0], pred[0])
             print("min max of prediction : ", pred.flatten().min(), pred.flatten().max())
             print("min max of validation : ", valid_annotations.flatten().min(), valid_annotations.flatten().max())
             print("DICE : ", dice_coeff)

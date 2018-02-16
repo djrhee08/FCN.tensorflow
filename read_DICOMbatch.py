@@ -70,7 +70,8 @@ class read_DICOM:
         self.num_files = len(mask_fname)
 
         # Randomize the order of data
-        self.random_batch = random.sample(range(0,self.num_files),self.num_files )
+        print("Num files : ", self.num_files)
+        self.random_batch = random.sample(range(0,self.num_files),self.num_files)
         print("random_batch: ", self.random_batch)
 
         self.image, self.mask = self.read_file()
