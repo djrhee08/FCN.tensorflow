@@ -13,7 +13,7 @@ import random
 
 class read_DICOM:
 
-    def __init__(self, dir_name='DICOM_data/training_set', contour_name='mandible', zero_slices=False, opt_resize=True,
+    def __init__(self, dir_name='DICOM_data/training_set', dir_image='image', dir_mask='mask',contour_name='mandible', zero_slices=False, opt_resize=True,
                  resize_shape=(224,224), opt_crop=False, crop_shape=(224,224),
                  rotation=True, rotation_angle=[90], bitsampling=True, bitsampling_bit=[4]):
         self.voxel_range = np.array([0,3000]) # any voxel bigger than 3000 would be 3000, less than 0 would be 0
@@ -36,12 +36,14 @@ class read_DICOM:
         self.rotation_angle = rotation_angle
         self.bitsampling = bitsampling
         self.bitsampling_bit = bitsampling_bit
+        self.dir_image = dir_image
+        self.dir_mask = dir_mask
 
         mask_fname = []
         mask_index = []
 
         # Only choose the dataset with given contour name & exclude the
-        for file in glob.glob(self.dir_name + "/mask/*.mat"):
+        for file in glob.glob(self.dir_name + '/' + self.dir_mask + '/*.mat'):
             num_str, mask, name = m2n.parsemask(file)
 
             for i in range(num_str):
@@ -53,7 +55,7 @@ class read_DICOM:
         # Matching mask with img
         image_fname = [0]*len(mask_fname)
 
-        for file in glob.glob(self.dir_name + "/image/*.mat"):
+        for file in glob.glob(self.dir_name + '/' + self.dir_image + "/*.mat"):
             img_name = os.path.basename(file)
             for masks in mask_fname:
                 if re.split("[._]", img_name)[1] == re.split("[._]",masks)[1]:
@@ -82,9 +84,10 @@ class read_DICOM:
         #print(self.file_index)
         #print(len(self.image_fname))
         print(self.image_fname[self.random_batch[self.file_index]])
+        print(self.dir_name + '/' + self.dir_image + '/' + self.image_fname[self.random_batch[self.file_index]])
 
-        image = m2n.loadimage(self.dir_name + '/image/' + self.image_fname[self.random_batch[self.file_index]])
-        _, mask, str_name = m2n.parsemask(self.dir_name + '/mask/' + self.mask_fname[self.random_batch[self.file_index]])
+        image = m2n.loadimage(self.dir_name + '/' + self.dir_image + '/' + self.image_fname[self.random_batch[self.file_index]])
+        _, mask, str_name = m2n.parsemask(self.dir_name + '/' + self.dir_mask + '/' + self.mask_fname[self.random_batch[self.file_index]])
         mask = mask[self.mask_index[self.random_batch[self.file_index]]]
 
         # Broadcasting from int32 to float64/32(?) is mandatory for resizing images without pixel value change!
@@ -135,7 +138,7 @@ class read_DICOM:
 
 
     # Data Augmentation function
-    def augment_img(self,img,type='image'):
+    def augment_img(self, img, type='image'):
         if not (type == 'image' or type == 'mask'):
             print('Type should be either image or mask. The undefined type is not acceptable : ', type)
             return

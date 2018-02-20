@@ -12,6 +12,7 @@ import datetime
 import BatchDatsetReader as dataset
 from six.moves import xrange
 import time
+import os
 
 FLAGS = tf.flags.FLAGS
 tf.flags.DEFINE_integer("batch_size", "2", "batch size for training")
@@ -21,13 +22,29 @@ tf.flags.DEFINE_float("learning_rate", "1e-4", "Learning rate for Adam Optimizer
 tf.flags.DEFINE_string("model_dir", "Model_zoo/", "Path to vgg model mat")
 tf.flags.DEFINE_bool('debug', "False", "Debug mode: True/ False")
 tf.flags.DEFINE_string('mode', "train", "Mode train/ test/ visualize")
-tf.flags.DEFINE_string('optimization', "cross_entropy", "optimization mode: cross_entropy/ dice")
+tf.flags.DEFINE_string('optimization', "dice", "optimization mode: cross_entropy/ dice")
+tf.flags.DEFINE_string('data_option', "normal", "data mode: normal/ fast")
+
+MAX_ITERATION = int(2000)
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
 
-MAX_ITERATION = int(20)
-# NUM_OF_CLASSESS = the number of segmentation classes + 1 (1 for none for anything)
-NUM_OF_CLASSESS = 2
+if FLAGS.data_option == "fast":
+    dir_image = 'image_fast'
+    dir_mask = 'mask_fast'
+else:
+    dir_image = 'image'
+    dir_mask = 'mask'
+
+
+# Create "logs/" directory if not exists
+if not os.path.exists("logs"):
+    os.makedirs("logs")
+    print("Directory 'logs' created")
+
+
+# NUM_OF_CLASSES = the number of segmentation classes + 1 (1 for none for anything)
+NUM_OF_CLASSES = 2
 IMAGE_SIZE = 224
 
 def dice(mask1, mask2, smooth=1e-5):
@@ -122,14 +139,14 @@ def inference(image, keep_prob):
             utils.add_activation_summary(relu7)
         relu_dropout7 = tf.nn.dropout(relu7, keep_prob=keep_prob)
 
-        W8 = utils.weight_variable([1, 1, 4096, NUM_OF_CLASSESS], name="W8")
-        b8 = utils.bias_variable([NUM_OF_CLASSESS], name="b8")
+        W8 = utils.weight_variable([1, 1, 4096, NUM_OF_CLASSES], name="W8")
+        b8 = utils.bias_variable([NUM_OF_CLASSES], name="b8")
         conv8 = utils.conv2d_basic(relu_dropout7, W8, b8)
         # annotation_pred1 = tf.argmax(conv8, dimension=3, name="prediction1")
 
         # now to upscale to actual image size
         deconv_shape1 = image_net["pool4"].get_shape()
-        W_t1 = utils.weight_variable([4, 4, deconv_shape1[3].value, NUM_OF_CLASSESS], name="W_t1")
+        W_t1 = utils.weight_variable([4, 4, deconv_shape1[3].value, NUM_OF_CLASSES], name="W_t1")
         b_t1 = utils.bias_variable([deconv_shape1[3].value], name="b_t1")
         conv_t1 = utils.conv2d_transpose_strided(conv8, W_t1, b_t1, output_shape=tf.shape(image_net["pool4"]))
         fuse_1 = tf.add(conv_t1, image_net["pool4"], name="fuse_1")
@@ -141,9 +158,9 @@ def inference(image, keep_prob):
         fuse_2 = tf.add(conv_t2, image_net["pool3"], name="fuse_2")
 
         shape = tf.shape(image)
-        deconv_shape3 = tf.stack([shape[0], shape[1], shape[2], NUM_OF_CLASSESS])
-        W_t3 = utils.weight_variable([16, 16, NUM_OF_CLASSESS, deconv_shape2[3].value], name="W_t3")
-        b_t3 = utils.bias_variable([NUM_OF_CLASSESS], name="b_t3")
+        deconv_shape3 = tf.stack([shape[0], shape[1], shape[2], NUM_OF_CLASSES])
+        W_t3 = utils.weight_variable([16, 16, NUM_OF_CLASSES, deconv_shape2[3].value], name="W_t3")
+        b_t3 = utils.bias_variable([NUM_OF_CLASSES], name="b_t3")
         conv_t3 = utils.conv2d_transpose_strided(fuse_2, W_t3, b_t3, output_shape=deconv_shape3, stride=8)
 
         annotation_pred = tf.argmax(conv_t3, dimension=3, name="prediction")
@@ -178,15 +195,12 @@ def main(argv=None):
         #loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=tf.squeeze(annotation, squeeze_dims=[3]),name="entropy"))  # For softmax
 
     elif FLAGS.optimization == "dice":
-        annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")  # For DICE
+        annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, NUM_OF_CLASSES], name="annotation")  # For DICE
         pred_annotation, logits = inference(image, keep_probability)
 
         # pred_annotation (argmax) is not differentiable so it cannot be optimized. So in loss, we need to use logits instead of pred_annotation!
-        label = tf.squeeze(annotation, squeeze_dims=[3])
-        smax = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label,name="entropy")
-        #loss = 1 - tl.cost.dice_coe(smax, tf.cast(label,dtype=tf.float32), axis=None)
-        loss = 1 - tl.cost.dice_coe(tf.cast(pred_annotation,dtype=tf.float32), tf.cast(label,dtype=tf.float32), axis=None)
-
+        logits = tf.nn.softmax(logits)
+        loss = 1 - tl.cost.dice_coe(logits, tf.cast(annotation, dtype=tf.float32))
 
     total_var = tf.trainable_variables()
     # ========================================
@@ -262,17 +276,18 @@ def main(argv=None):
 
     if FLAGS.mode == "train":
         print("Setting up training data...")
-        dicom_records = dicom_batch.read_DICOM(dir_name=dir_name + 'training_set', contour_name=contour_name,
-                                               opt_resize=opt_resize, resize_shape=resize_shape, opt_crop=opt_crop,
-                                               crop_shape=crop_shape, rotation=rotation, rotation_angle=rotation_angle,
-                                               bitsampling=bitsampling, bitsampling_bit=bitsampling_bit)
+        dicom_records = dicom_batch.read_DICOM(dir_name=dir_name + 'training_set', dir_image=dir_image, dir_mask=dir_mask,
+                                               contour_name=contour_name, opt_resize=opt_resize, resize_shape=resize_shape,
+                                               opt_crop=opt_crop, crop_shape=crop_shape, rotation=rotation,
+                                               rotation_angle=rotation_angle, bitsampling=bitsampling,
+                                               bitsampling_bit=bitsampling_bit)
 
         print("Setting up validation data...")
-        validation_records = dicom_batch.read_DICOM(dir_name=dir_name + 'validation_set', contour_name=contour_name,
-                                                    opt_resize=opt_resize, resize_shape=resize_shape, opt_crop=opt_crop,
-                                                    crop_shape=crop_shape, rotation=False,
-                                                    rotation_angle=rotation_angle,
-                                                    bitsampling=False, bitsampling_bit=bitsampling_bit)
+        validation_records = dicom_batch.read_DICOM(dir_name=dir_name + 'validation_set', dir_image=dir_image, dir_mask=dir_mask,
+                                                    contour_name=contour_name, opt_resize=opt_resize, resize_shape=resize_shape,
+                                                    opt_crop=opt_crop, crop_shape=crop_shape, rotation=False,
+                                                    rotation_angle=rotation_angle, bitsampling=False,
+                                                    bitsampling_bit=bitsampling_bit)
 
         print("Start training")
         start = time.time()
@@ -281,8 +296,15 @@ def main(argv=None):
         validation_loss_list = []
         x_validation = []
         # for itr in xrange(MAX_ITERATION):
-        for itr in xrange(2000): # about 12 hours of work
+        for itr in xrange(MAX_ITERATION): # about 12 hours of work / 2000
             train_images, train_annotations = dicom_records.next_batch(batch_size=batch_size)
+
+            ##################################################################################
+            if FLAGS.optimization == "dice":
+                train_annotations = np.repeat(train_annotations,2,axis=3)
+                train_annotations[:,:,:,0] = 1 - train_annotations[:,:,:,1]
+            ###################################################################################
+
             feed_dict = {image: train_images, annotation: train_annotations, keep_probability: 0.85}
             sess.run(train_op, feed_dict=feed_dict)
 
@@ -375,27 +397,61 @@ def main(argv=None):
 
     elif FLAGS.mode == "visualize":
         print("Setting up validation data...")
-        validation_records = dicom_batch.read_DICOM(dir_name=dir_name + 'validation_set', contour_name=contour_name,
-                                                    opt_resize=opt_resize, resize_shape=resize_shape, opt_crop=opt_crop,
-                                                    crop_shape=crop_shape, rotation=False,
-                                                    rotation_angle=rotation_angle,
-                                                    bitsampling=False, bitsampling_bit=bitsampling_bit)
+        validation_records = dicom_batch.read_DICOM(dir_name=dir_name + 'validation_set', dir_image=dir_image, dir_mask=dir_mask,
+                                                    contour_name=contour_name, opt_resize=opt_resize, resize_shape=resize_shape,
+                                                    opt_crop=opt_crop, crop_shape=crop_shape, rotation=False,
+                                                    rotation_angle=rotation_angle, bitsampling=False,
+                                                    bitsampling_bit=bitsampling_bit)
 
+        dice_array = []
+        bins = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
         # Save the image for display. Use matplotlib to draw this.
         for itr in range(20):
             valid_images, valid_annotations = validation_records.next_batch(batch_size=1)
+
+            ##################################################################################
+            if FLAGS.optimization == "dice":
+                valid_annotations = np.repeat(valid_annotations,2,axis=3)
+                valid_annotations[:,:,:,0] = 1 - valid_annotations[:,:,:,1]
+                print(valid_annotations.shape)
+            else:
+                valid_annotations = np.squeeze(valid_annotations, axis=3)
+            ###################################################################################
+
             pred = sess.run(pred_annotation, feed_dict={image: valid_images, annotation: valid_annotations, keep_probability: 1.0})
-            valid_annotations = np.squeeze(valid_annotations, axis=3)
             pred = np.squeeze(pred, axis=3)
 
-            print(valid_images.shape, valid_annotations.shape, pred.shape)
+            #################
+            logits2 = sess.run(logits, feed_dict={image: valid_images, annotation: valid_annotations, keep_probability: 1.0})
 
-            dice_coeff = dice(valid_annotations[0], pred[0])
+            print(type(logits2), logits2.shape, pred.shape)
+            plt.subplot(131)
+            plt.imshow(logits2[0, :, :, 0], cmap='gray')
+            plt.subplot(132)
+            plt.imshow(logits2[0, :, :, 1], cmap='gray')
+            plt.subplot(133)
+            plt.imshow(pred[0,:,:], cmap='gray')
+            plt.show()
+            sumlogits = logits2[0,:,:,0] + logits2[0,:,:,1]
+            print(sumlogits)
+            print(np.mean(sumlogits))
+            ######################
+
+
+
+            print(valid_images.shape, valid_annotations.shape, pred.shape)
+            if FLAGS.optimization == "dice":
+                dice_coeff = dice(valid_annotations[0,:,:,1], pred[0])
+            else:
+                dice_coeff = dice(valid_annotations[0], pred[0])
+
+            dice_array.append(dice_coeff)
             print("min max of prediction : ", pred.flatten().min(), pred.flatten().max())
             print("min max of validation : ", valid_annotations.flatten().min(), valid_annotations.flatten().max())
             print("DICE : ", dice_coeff)
 
-            # Add DICE value to the figure
+            """
+            # Save images
             plt.subplot(131)
             plt.imshow(valid_images[0, :, :, 0], cmap='gray')
             plt.title("image")
@@ -405,10 +461,18 @@ def main(argv=None):
             plt.subplot(133)
             plt.imshow(pred[0], cmap='gray')
             plt.title("mask predicted")
+            plt.suptitle("DICE : " + str(dice_coeff))
 
             plt.savefig(FLAGS.logs_dir + "/Prediction_validation" + str(itr) + ".png")
             # plt.show()
+            """
 
+        plt.hist(dice_array,bins)
+        plt.xlabel('Dice')
+        plt.ylabel('frequency')
+        plt.title('Dice coefficient distribution of validation dataset')
+        plt.savefig(FLAGS.logs_dir + "/dice histogram" + ".png")
+        #plt.show()
 
 if __name__ == "__main__":
     tf.app.run()
