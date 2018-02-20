@@ -21,18 +21,19 @@ tf.flags.DEFINE_float("learning_rate", "1e-4", "Learning rate for Adam Optimizer
 tf.flags.DEFINE_string("model_dir", "Model_zoo/", "Path to vgg model mat")
 tf.flags.DEFINE_bool('debug', "False", "Debug mode: True/ False")
 tf.flags.DEFINE_string('mode', "train", "Mode train/ test/ visualize")
-tf.flags.DEFINE_string('optimization', "dice", "optimization mode: cross_entropy/ dice")
+tf.flags.DEFINE_string('optimization', "cross_entropy", "optimization mode: cross_entropy/ dice")
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
 
 MAX_ITERATION = int(20)
-NUM_OF_CLASSESS = 151
+# NUM_OF_CLASSESS = the number of segmentation classes + 1 (1 for none for anything)
+NUM_OF_CLASSESS = 2
 IMAGE_SIZE = 224
 
 def dice(mask1, mask2, smooth=1e-5):
     print(mask1.shape, mask2.shape)
-    mask1 = mask1 / (mask1.flatten().max())
-    mask2 = mask2 / (mask2.flatten().max())
+    mask1 = mask1 / (mask1.flatten().max() + smooth)
+    mask2 = mask2 / (mask2.flatten().max() + smooth)
     mul = mask1 * mask2
     inse = np.sum(mul.flatten())
 
@@ -167,25 +168,24 @@ def main(argv=None):
     image = tf.placeholder(tf.float32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 3], name="input_image")
 
     if FLAGS.optimization == "cross_entropy":
-        annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")   # For softmax
+        annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")   # For cross entropy
         pred_annotation, logits = inference(image, keep_probability)
         print("pred_annotation, logits shape", pred_annotation.get_shape().as_list(), logits.get_shape().as_list())
 
         label = tf.squeeze(annotation, squeeze_dims=[3])
-        smax = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label,name="entropy")
-        loss = tf.reduce_mean(smax) # For softmax
-        print("label, annotation, smax shape", label.get_shape().as_list(), annotation.get_shape().as_list(), smax.get_shape().as_list())
+        loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label,name="entropy")) # For softmax
 
         #loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=tf.squeeze(annotation, squeeze_dims=[3]),name="entropy"))  # For softmax
 
     elif FLAGS.optimization == "dice":
-        annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")  # For softmax
+        annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")  # For DICE
         pred_annotation, logits = inference(image, keep_probability)
 
         # pred_annotation (argmax) is not differentiable so it cannot be optimized. So in loss, we need to use logits instead of pred_annotation!
         label = tf.squeeze(annotation, squeeze_dims=[3])
         smax = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label,name="entropy")
-        loss = 1 - tl.cost.dice_coe(smax, tf.cast(label,dtype=tf.float32), axis=None)
+        #loss = 1 - tl.cost.dice_coe(smax, tf.cast(label,dtype=tf.float32), axis=None)
+        loss = 1 - tl.cost.dice_coe(tf.cast(pred_annotation,dtype=tf.float32), tf.cast(label,dtype=tf.float32), axis=None)
 
 
     total_var = tf.trainable_variables()
@@ -281,7 +281,7 @@ def main(argv=None):
         validation_loss_list = []
         x_validation = []
         # for itr in xrange(MAX_ITERATION):
-        for itr in xrange(6000): # about 15 hours of work
+        for itr in xrange(2000): # about 12 hours of work
             train_images, train_annotations = dicom_records.next_batch(batch_size=batch_size)
             feed_dict = {image: train_images, annotation: train_annotations, keep_probability: 0.85}
             sess.run(train_op, feed_dict=feed_dict)

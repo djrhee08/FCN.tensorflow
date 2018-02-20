@@ -335,7 +335,7 @@ def main(argv=None):
 
         for itr in range(20):
             test_images, test_annotations = test_records.next_batch(batch_size=1)
-            pred = sess.run(pred_annotation, feed_dict={image: test_images, annotation: test_annotations,keep_probability: 1.0})
+            pred = sess.run(pred_annotation, feed_dict={image: test_images, annotation: test_annotations, keep_probability: 1.0})
             test_annotations = np.squeeze(test_annotations, axis=3)
             pred = np.squeeze(pred, axis=3)
             print("min max of prediction : ", pred.flatten().min(), pred.flatten().max())
