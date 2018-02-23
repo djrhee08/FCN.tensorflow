@@ -5,11 +5,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import TensorflowUtils as utils
-import read_MITSceneParsingData as scene_parsing
 import read_DICOMbatch as dicom_batch
 import read_DICOMbatchImageOnly as dicom_batchImage
 import datetime
-import BatchDatsetReader as dataset
 from six.moves import xrange
 import time
 import os
@@ -17,15 +15,14 @@ import os
 FLAGS = tf.flags.FLAGS
 tf.flags.DEFINE_integer("batch_size", "2", "batch size for training")
 tf.flags.DEFINE_string("logs_dir", "logs/", "path to logs directory")
-tf.flags.DEFINE_string("data_dir", "Data_zoo/MIT_SceneParsing/", "path to dataset")
-tf.flags.DEFINE_float("learning_rate", "1e-4", "Learning rate for Adam Optimizer")
+tf.flags.DEFINE_float("learning_rate", "5e-5", "Learning rate for Adam Optimizer")
 tf.flags.DEFINE_string("model_dir", "Model_zoo/", "Path to vgg model mat")
 tf.flags.DEFINE_bool('debug', "False", "Debug mode: True/ False")
 tf.flags.DEFINE_string('mode', "train", "Mode train/ test/ visualize")
 tf.flags.DEFINE_string('optimization', "dice", "optimization mode: cross_entropy/ dice")
 tf.flags.DEFINE_string('data_option', "normal", "data mode: normal/ fast")
 
-MAX_ITERATION = int(2000)
+MAX_ITERATION = int(9000)
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
 
@@ -47,15 +44,19 @@ if not os.path.exists("logs"):
 NUM_OF_CLASSES = 2
 IMAGE_SIZE = 224
 
-def dice(mask1, mask2, smooth=1e-5):
+def dice(mask1, mask2, smooth=1e-6):
     print(mask1.shape, mask2.shape)
-    mask1 = mask1 / (mask1.flatten().max() + smooth)
-    mask2 = mask2 / (mask2.flatten().max() + smooth)
+    print(mask1.flatten().max(), mask2.flatten().max())
+    print(np.sum(mask1.flatten()), np.sum(mask2.flatten()))
+
     mul = mask1 * mask2
+    print(mul.flatten().max(), np.sum(mul.flatten()))
     inse = np.sum(mul.flatten())
 
     l = np.sum(mask1.flatten())
     r = np.sum(mask2.flatten())
+
+    print("l, r, intersection : ", l, r, inse)
 
     dice_coeff = (2.* inse + smooth) / (l + r + smooth)
 
@@ -195,12 +196,15 @@ def main(argv=None):
         #loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=tf.squeeze(annotation, squeeze_dims=[3]),name="entropy"))  # For softmax
 
     elif FLAGS.optimization == "dice":
-        annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, NUM_OF_CLASSES], name="annotation")  # For DICE
+        annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")  # For DICE
         pred_annotation, logits = inference(image, keep_probability)
 
         # pred_annotation (argmax) is not differentiable so it cannot be optimized. So in loss, we need to use logits instead of pred_annotation!
-        logits = tf.nn.softmax(logits)
-        loss = 1 - tl.cost.dice_coe(logits, tf.cast(annotation, dtype=tf.float32))
+        logits = tf.nn.softmax(logits) # axis = -1 default
+
+        logits2 = tf.slice(logits, [0,0,0,1],[-1,IMAGE_SIZE,IMAGE_SIZE,1])
+
+        loss = 1 - tl.cost.dice_coe(logits2, tf.cast(annotation, dtype=tf.float32))
 
     total_var = tf.trainable_variables()
     # ========================================
@@ -245,8 +249,11 @@ def main(argv=None):
 
     """
     # All the variables defined HERE -------------------------------
-    dir_name = 'DICOM_data/mandible/'
-    contour_name = 'brainstem'
+    #dir_name = 'DICOM_data/mandible/'
+    #contour_name = 'brainstem'
+
+    dir_name = 'DICOM_data/cord/'
+    contour_name = 'cord'
 
     batch_size = 3
 
@@ -299,13 +306,14 @@ def main(argv=None):
         for itr in xrange(MAX_ITERATION): # about 12 hours of work / 2000
             train_images, train_annotations = dicom_records.next_batch(batch_size=batch_size)
 
+            """
             ##################################################################################
             if FLAGS.optimization == "dice":
                 train_annotations = np.repeat(train_annotations,2,axis=3)
                 train_annotations[:,:,:,0] = 1 - train_annotations[:,:,:,1]
             ###################################################################################
-
-            feed_dict = {image: train_images, annotation: train_annotations, keep_probability: 0.85}
+            """
+            feed_dict = {image: train_images, annotation: train_annotations, keep_probability: 0.75}
             sess.run(train_op, feed_dict=feed_dict)
 
             if (itr+1) % 20 == 0:
@@ -318,6 +326,13 @@ def main(argv=None):
 
             if (itr+1) % 50 == 0:
                 valid_images, valid_annotations = validation_records.next_batch(batch_size=batch_size)
+                """
+                ##################################################################################
+                if FLAGS.optimization == "dice":
+                    valid_annotations = np.repeat(valid_annotations, 2, axis=3)
+                    valid_annotations[:, :, :, 0] = 1 - valid_annotations[:, :, :, 1]
+                ###################################################################################
+                """
                 valid_loss = sess.run(loss, feed_dict={image: valid_images, annotation: valid_annotations,
                                                        keep_probability: 1.0})
                 print("%s ---> Validation_loss: %g" % (datetime.datetime.now(), valid_loss))
@@ -341,10 +356,11 @@ def main(argv=None):
         plt.xlabel("epoch")
         plt.ylabel("loss")
         plt.ylim(ymin=min(train_loss_list))
-        plt.ylim(ymax=max(train_loss_list))
+        plt.ylim(ymax=max(train_loss_list)*1.1)
         plt.legend()
         plt.savefig("loss_functions.png")
         #plt.show()
+
 
 
     # Need to add another mode to draw the contour based on image only.
@@ -379,7 +395,7 @@ def main(argv=None):
                 # plt.show()
 
             """
-            for itr in range(100):
+            for itr in range(10):
                 test_images = test_records.next_batch(batch_size=test_batch_size)
                 pred = sess.run(pred_annotation, feed_dict={image: test_images, annotation: test_annotations, keep_probability: 1.0})
                 pred = np.squeeze(pred, axis=3)
@@ -409,7 +425,8 @@ def main(argv=None):
         for itr in range(20):
             valid_images, valid_annotations = validation_records.next_batch(batch_size=1)
 
-            ##################################################################################
+            """
+            ## In order to used 'None' Class and mask class at the same time for DICE objective function
             if FLAGS.optimization == "dice":
                 valid_annotations = np.repeat(valid_annotations,2,axis=3)
                 valid_annotations[:,:,:,0] = 1 - valid_annotations[:,:,:,1]
@@ -417,46 +434,46 @@ def main(argv=None):
             else:
                 valid_annotations = np.squeeze(valid_annotations, axis=3)
             ###################################################################################
+            """
 
+            #valid_annotations = np.squeeze(valid_annotations, axis=3)
             pred = sess.run(pred_annotation, feed_dict={image: valid_images, annotation: valid_annotations, keep_probability: 1.0})
             pred = np.squeeze(pred, axis=3)
 
+            """
             #################
             logits2 = sess.run(logits, feed_dict={image: valid_images, annotation: valid_annotations, keep_probability: 1.0})
 
             print(type(logits2), logits2.shape, pred.shape)
-            plt.subplot(131)
+            plt.subplot(121)
             plt.imshow(logits2[0, :, :, 0], cmap='gray')
-            plt.subplot(132)
-            plt.imshow(logits2[0, :, :, 1], cmap='gray')
-            plt.subplot(133)
-            plt.imshow(pred[0,:,:], cmap='gray')
-            plt.show()
-            sumlogits = logits2[0,:,:,0] + logits2[0,:,:,1]
-            print(sumlogits)
-            print(np.mean(sumlogits))
+            plt.subplot(122)
+            plt.imshow(pred[0, :, :], cmap='gray')
+            plt.savefig(FLAGS.logs_dir + "/logits_pred" + str(itr) + ".png")
+            #plt.show()
+            print(logits2.min(), logits2.max(), np.mean(logits2))
+            print(pred[0].min(), pred[0].max(), np.mean(pred[0]))
+            print(valid_annotations[0].min(), valid_annotations[0].max(), np.mean(valid_annotations[0]))
             ######################
-
-
+            """
 
             print(valid_images.shape, valid_annotations.shape, pred.shape)
-            if FLAGS.optimization == "dice":
-                dice_coeff = dice(valid_annotations[0,:,:,1], pred[0])
-            else:
-                dice_coeff = dice(valid_annotations[0], pred[0])
+            valid_annotations = np.squeeze(valid_annotations, axis=3)
+            dice_coeff = dice(valid_annotations[0], pred[0])
 
             dice_array.append(dice_coeff)
             print("min max of prediction : ", pred.flatten().min(), pred.flatten().max())
             print("min max of validation : ", valid_annotations.flatten().min(), valid_annotations.flatten().max())
             print("DICE : ", dice_coeff)
+            print(valid_annotations.shape)
 
-            """
+
             # Save images
             plt.subplot(131)
             plt.imshow(valid_images[0, :, :, 0], cmap='gray')
             plt.title("image")
             plt.subplot(132)
-            plt.imshow(valid_annotations[0], cmap='gray')
+            plt.imshow(valid_annotations[0,:,:], cmap='gray')
             plt.title("mask original")
             plt.subplot(133)
             plt.imshow(pred[0], cmap='gray')
@@ -465,8 +482,8 @@ def main(argv=None):
 
             plt.savefig(FLAGS.logs_dir + "/Prediction_validation" + str(itr) + ".png")
             # plt.show()
-            """
 
+        # Does not save histogram... WHY?
         plt.hist(dice_array,bins)
         plt.xlabel('Dice')
         plt.ylabel('frequency')
