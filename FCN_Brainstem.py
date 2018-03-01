@@ -18,7 +18,7 @@ tf.flags.DEFINE_string("logs_dir", "logs/", "path to logs directory")
 tf.flags.DEFINE_float("learning_rate", "5e-5", "Learning rate for Adam Optimizer")
 tf.flags.DEFINE_string("model_dir", "Model_zoo/", "Path to vgg model mat")
 tf.flags.DEFINE_bool('debug', "False", "Debug mode: True/ False")
-tf.flags.DEFINE_string('mode', "train", "Mode train/ test/ visualize")
+tf.flags.DEFINE_string('mode', "visualize", "Mode train/ test/ visualize")
 tf.flags.DEFINE_string('optimization', "dice", "optimization mode: cross_entropy/ dice")
 tf.flags.DEFINE_string('data_option', "normal", "data mode: normal/ fast")
 
@@ -483,7 +483,7 @@ def main(argv=None):
             plt.savefig(FLAGS.logs_dir + "/Prediction_validation" + str(itr) + ".png")
             # plt.show()
 
-        # Does not save histogram... WHY?
+        plt.figure()
         plt.hist(dice_array,bins)
         plt.xlabel('Dice')
         plt.ylabel('frequency')
